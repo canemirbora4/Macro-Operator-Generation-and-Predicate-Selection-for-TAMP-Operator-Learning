@@ -5,17 +5,20 @@ operator precondition or effect. Shrinks the symbolic state parsed at every
 A* node, reducing both state-parsing overhead and search branching.
 """
 
-from approaches.safe_refinements import LOFTSafeRefinements
+from approaches.loft import LOFT
 from utils import extract_preds_and_types_from_ops
 
 
-class LOFTIPS(LOFTSafeRefinements):
-    """Safe refinements + Iterative Predicate Selection."""
+class LOFTIPS(LOFT):
+    """LOFT + Iterative Predicate Selection."""
+
+    # Ablation variants set this to False to skip the pruning step.
+    _use_ips = True
 
     def train(self, data):
         super().train(data)
 
-        if self._operators:
+        if self._use_ips and self._operators:
             used_preds, _ = extract_preds_and_types_from_ops(self._operators)
 
             original_count = len(self._state_preds)

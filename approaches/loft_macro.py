@@ -303,12 +303,15 @@ class LOFTMacro(LOFTIPS):
             res1 = pred1.sample(rng, state, *args1_discrete)
             res1_iter = iter(res1)
 
+            # Sample the first sub-action, recording each continuous value
+            # under the macro-level slot it occupies.
             act1_args = []
             args1_d_iter = iter(args1_discrete)
-            for vt in pred1.var_types:
+            for j, vt in enumerate(pred1.var_types):
                 if vt.is_continuous:
                     val = next(res1_iter)
-                    act1_args.append(vt(f"sampled", val))
+                    sampled_values[indices1[j]] = val
+                    act1_args.append(vt("sampled", val))
                 else:
                     act1_args.append(next(args1_d_iter))
 
@@ -318,17 +321,17 @@ class LOFTMacro(LOFTIPS):
             except Exception:
                 next_state = state
 
-            for i in indices1:
-                if is_continuous[i] and i not in sampled_values:
-                    pass  # values already consumed above
-
+            # Sample the second sub-action conditioned on the intermediate
+            # state. A slot already filled by the first sub-action is shared,
+            # so it is sampled once and reused rather than overwritten.
             args2_discrete = [args[u2d[i]] for i in indices2
                               if not is_continuous[i]]
             res2 = pred2.sample(rng, next_state, *args2_discrete)
             res2_iter = iter(res2)
-            for i in indices2:
-                if is_continuous[i] and i not in sampled_values:
-                    sampled_values[i] = next(res2_iter)
+            for j, vt in enumerate(pred2.var_types):
+                if vt.is_continuous:
+                    val = next(res2_iter)
+                    sampled_values.setdefault(indices2[j], val)
 
             return tuple(sampled_values[i] for i in continuous_indices)
 

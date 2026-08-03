@@ -15,20 +15,19 @@ import numpy as np
 
 from envs import create_env
 from approaches import LOFTMacro, LOFTIPS, ApproachTimeout, ApproachFailed
-from approaches.ablation_proper import (
-    FullMinusSubsumption, FullMinusLaplace,
-    FullMinusBacktracking, FullMinusIPS, FullMinusMacro
-)
+from approaches.ablation_proper import FullMinusIPS, FullMinusMacro
 from settings import create_config
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", required=True, type=str,
-                        choices=["cover", "blocks", "painting", "warehouse", "kitchen"])
+                        choices=["cover", "blocks", "painting", "kitchen"])
     parser.add_argument("--start_seed", required=True, type=int)
     parser.add_argument("--num_seeds", required=True, type=int)
     parser.add_argument("--collect_data", type=int, default=0)
+    parser.add_argument("--variants", type=str, default=None,
+                        help="Comma-separated subset of: Full Model,- IPS,- Macro")
     return parser.parse_args()
 
 
@@ -81,14 +80,16 @@ def main():
     args = parse_args()
     config = create_config(args)
 
-    approaches = {
-        "Full Model":         LOFTMacro,
-        "− Subsumption":      FullMinusSubsumption,
-        "− Laplace":          FullMinusLaplace,
-        "− Backtracking":     FullMinusBacktracking,
-        "− IPS":              FullMinusIPS,
-        "− Macro":            FullMinusMacro,
+    all_approaches = {
+        "Full Model": LOFTMacro,
+        "- IPS":      FullMinusIPS,
+        "- Macro":    FullMinusMacro,
     }
+    if args.variants:
+        names = [v.strip() for v in args.variants.split(",")]
+        approaches = {k: v for k, v in all_approaches.items() if k in names}
+    else:
+        approaches = all_approaches
     
     with open(os.path.join(config.data_dir, f"{args.env}.p"), "rb") as f:
         data = pkl.load(f)

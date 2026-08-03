@@ -25,8 +25,6 @@ def get_gt_ops(config, state_predicates, action_predicates):
         cls = CoverOperators(state_predicates, action_predicates)
     elif config.env == "blocks":
         cls = BlocksOperators(state_predicates, action_predicates)
-    elif config.env == "warehouse":
-        cls = WarehouseOperators(state_predicates, action_predicates)
     elif config.env == "kitchen":
         cls = KitchenOperators(state_predicates, action_predicates)
     else:
@@ -274,44 +272,6 @@ class PaintingOperators(GroundTruthOperators):
         paint_ndrs.append(NDR(action, preconditions, effect_probs, effects))
 
         all_ndrs[action] = NDRSet(action, paint_ndrs)
-
-        return ndrs_to_operators(all_ndrs)
-
-
-class WarehouseOperators(GroundTruthOperators):
-    """Ground truth operators for the warehouse environment.
-    
-    Simple Pick → Place domain for macro showcase.
-    """
-    def get_operators(self):
-        HandEmpty = self._preds["HandEmpty"]
-        Holding = self._preds["Holding"]
-        OnTable = self._preds["OnTable"]
-        OnShelf = self._preds["OnShelf"]
-        Pick = self._preds["Pick"]
-        Place = self._preds["Place"]
-
-        all_ndrs = {}
-
-        # Pick: Pick up a package from table
-        pick_ndrs = []
-        action = Pick("?pkg", "?pose")
-        preconditions = [OnTable("?pkg"), HandEmpty()]
-        effects = [{Anti(OnTable("?pkg")), Anti(HandEmpty()), Holding("?pkg")},
-                   {NOISE_OUTCOME}]
-        effect_probs = [1.0, 0.0]
-        pick_ndrs.append(NDR(action, preconditions, effect_probs, effects))
-        all_ndrs[action] = NDRSet(action, pick_ndrs)
-
-        # Place: Place held package onto shelf
-        place_ndrs = []
-        action = Place("?pose")
-        preconditions = [Holding("?pkg")]
-        effects = [{Anti(Holding("?pkg")), HandEmpty(), OnShelf("?pkg")},
-                   {NOISE_OUTCOME}]
-        effect_probs = [1.0, 0.0]
-        place_ndrs.append(NDR(action, preconditions, effect_probs, effects))
-        all_ndrs[action] = NDRSet(action, place_ndrs)
 
         return ndrs_to_operators(all_ndrs)
 

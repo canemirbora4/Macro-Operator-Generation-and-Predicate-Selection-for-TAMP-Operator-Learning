@@ -31,10 +31,6 @@ class Config:
     kitchen_test_num_objs = [6, 7, 8]
     kitchen_num_test_problems = 20
 
-    # Warehouse domain - simple Pick→Place, many objects (macro showcase)
-    warehouse_demo_num_pkgs = [3, 4, 5]  # Small for demos
-    warehouse_test_num_pkgs = [8, 10, 12, 15]  # Larger: 16-30 steps without macros
-    warehouse_num_test_problems = 20
 
     backtracking_num_samples_per_step = 10
     effect_prob_threshold = 0.001
@@ -70,7 +66,6 @@ def create_config(args):
         "cover": 100,
         "painting": 2500,
         "blocks": 100,
-        "warehouse": 200,
         "kitchen": 1000,
     }[args.env]
 
@@ -78,7 +73,6 @@ def create_config(args):
         "cover": 5,
         "painting": 50,
         "blocks": 50,
-        "warehouse": 30,
         "kitchen": 50,
     }[args.env]
 
@@ -86,7 +80,6 @@ def create_config(args):
         "cover": 1,
         "painting": 10,
         "blocks": 10,
-        "warehouse": 10,
         "kitchen": 10,
     }[args.env]
 

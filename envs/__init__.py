@@ -2,7 +2,6 @@ from envs.base_env import BaseEnv
 from envs.cover import Cover
 from envs.painting import Painting
 from envs.blocks import Blocks
-from envs.warehouse import Warehouse
 from envs.kitchen import Kitchen
 
 
@@ -11,7 +10,6 @@ def create_env(config):
         "cover": Cover,
         "painting": Painting,
         "blocks": Blocks,
-        "warehouse": Warehouse,
         "kitchen": Kitchen,
     }
     return name_to_cls[config.env](config)
