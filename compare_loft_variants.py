@@ -2,9 +2,8 @@
 
 Variants:
   LOFT            — original LOFT baseline
-  SafeRefinements — + subsumption filtering, Laplace smoothing, adaptive backtracking
-  IPS             — + Iterative Predicate Selection
-  Macro           — + macro-operator mining (full pipeline)
+  IPS             — LOFT + Iterative Predicate Selection
+  Macro           — LOFT + IPS + macro-operator generation (full pipeline)
 
 Usage:
     python compare_loft_variants.py --env cover --start_seed 0 --num_seeds 5
@@ -21,7 +20,7 @@ from collections import defaultdict
 import numpy as np
 
 from envs import create_env
-from approaches import (LOFT, LOFTSafeRefinements, LOFTIPS, LOFTMacro,
+from approaches import (LOFT, LOFTIPS, LOFTMacro,
                         ApproachTimeout, ApproachFailed)
 from settings import create_config
 
@@ -29,14 +28,14 @@ from settings import create_config
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", required=True, type=str,
-                        choices=["cover", "blocks", "painting", "warehouse", "kitchen"])
+                        choices=["cover", "blocks", "painting", "kitchen"])
     parser.add_argument("--start_seed", required=True, type=int)
     parser.add_argument("--num_seeds", required=True, type=int)
     parser.add_argument("--collect_data", type=int, default=0)
     parser.add_argument("--no-timeout", action="store_true",
                         help="Disable planning timeout (use 24h effective limit)")
     parser.add_argument("--approaches", type=str, default=None,
-                        help="Comma-separated list: LOFT,SafeRefinements,IPS,Macro (default: all)")
+                        help="Comma-separated list: LOFT,IPS,Macro (default: all)")
     parser.add_argument("--gui", action="store_true",
                         help="Enable PyBullet GUI for visualization")
     return parser.parse_args()
@@ -105,10 +104,9 @@ def main():
         config.approach_timeout = 86400  # 24 hours
 
     all_approaches = {
-        "LOFT":             LOFT,
-        "SafeRefinements":  LOFTSafeRefinements,
-        "IPS":              LOFTIPS,
-        "Macro":            LOFTMacro,
+        "LOFT":  LOFT,
+        "IPS":   LOFTIPS,
+        "Macro": LOFTMacro,
     }
     if args.approaches:
         names = [s.strip() for s in args.approaches.split(",")]
