@@ -36,6 +36,8 @@ def parse_args():
                         help="Disable planning timeout (use 24h effective limit)")
     parser.add_argument("--approaches", type=str, default=None,
                         help="Comma-separated list: LOFT,IPS,Macro (default: all)")
+    parser.add_argument("--tag", type=str, default="",
+                        help="Suffix for the results file, e.g. 50seeds")
     parser.add_argument("--gui", action="store_true",
                         help="Enable PyBullet GUI for visualization")
     return parser.parse_args()
@@ -64,9 +66,11 @@ def run_approach(approach_cls, config, env, data, test_problems, seed):
     
     # Test
     solved, plan_times, plan_lengths = 0, [], []
+    per_problem = []  # plan time of each test problem, None if unsolved
     first_plan_data = None
     for init_state, goal in test_problems:
         plan_start = time.time()
+        solved_time = None
         try:
             plan = approach.plan(init_state, goal, config.approach_timeout)
             plan_time = time.time() - plan_start
@@ -78,12 +82,14 @@ def run_approach(approach_cls, config, env, data, test_problems, seed):
             
             if goal.holds(state):
                 solved += 1
+                solved_time = plan_time
                 plan_times.append(plan_time)
                 plan_lengths.append(len(plan))
                 if first_plan_data is None:
                     first_plan_data = (init_state, goal, plan)
         except (ApproachFailed, ApproachTimeout):
             pass
+        per_problem.append(solved_time)
     
     return {
         "train_time": train_time,
@@ -93,6 +99,7 @@ def run_approach(approach_cls, config, env, data, test_problems, seed):
         "total": len(test_problems),
         "plan_times": plan_times,
         "plan_lengths": plan_lengths,
+        "per_problem": per_problem,
         "first_plan": first_plan_data,
     }
 
@@ -125,11 +132,18 @@ def main():
     
     print(f"Comparing {list(approaches.keys())} on {args.env}")
     
-    for seed in range(args.start_seed, args.start_seed + args.num_seeds):
+    seeds_used = []
+    for seed in range(args.start_seed, args.start_seed + args.num_seeds + 100):
+        if len(seeds_used) >= args.num_seeds:
+            break
         print(f"\nSeed {seed}:")
         env = create_env(config)
         env.set_seed(seed)
-        test_problems = env.get_test_problems()
+        try:
+            test_problems = env.get_test_problems()
+        except Exception as exc:  # the problem sampler can run out of attempts
+            print(f"  skipping seed {seed}: cannot sample test problems ({exc})")
+            continue
         
         viz_data = None
         for name, cls in approaches.items():
@@ -144,6 +158,9 @@ def main():
             results[name]["solved"].append(m["solved"])
             results[name]["total"].append(m["total"])
             results[name]["plan_times"].extend(m["plan_times"])
+            results[name]["plan_times_per_seed"].append(list(m["plan_times"]))
+            results[name]["times_by_problem_per_seed"].append(list(m["per_problem"]))
+            results[name]["plan_lengths_per_seed"].append(list(m["plan_lengths"]))
             # Store mean plan length for this seed (NaN if no plans)
             if m["plan_lengths"]:
                 results[name]["plan_lengths"].append(np.mean(m["plan_lengths"]))
@@ -152,6 +169,7 @@ def main():
             
             avg_time = f"{np.mean(m['plan_times']):.4f}s" if m['plan_times'] else "N/A"
             print(f"Solved {m['solved']}/{m['total']} ({avg_time} avg)")
+        seeds_used.append(seed)
     
     # Results
     col_w = 22  # column width for mean ± std
@@ -170,8 +188,8 @@ def main():
     # Helper to get stats with mean ± std
     def get_stats(data, key, is_rate=False):
         if key == "plan_times":
-            # For plan_times, compute per-seed means first for std
-            vals = data[key]  # flattened list
+            # One value per seed: mean time over that seed's solved problems
+            vals = [float(np.mean(t)) for t in data["plan_times_per_seed"] if t]
         elif key == "plan_lengths":
             vals = [v for v in data[key] if not np.isnan(v)]
         elif is_rate:
@@ -181,7 +199,7 @@ def main():
             
         if not vals: return "N/A"
         mean = np.mean(vals)
-        std = np.std(vals)
+        std = np.std(vals, ddof=1) if len(vals) > 1 else 0.0
         if is_rate:
             return f"{100*mean:.1f} ± {100*std:.1f}%"
         if key in ["ops", "preds"]:
@@ -213,6 +231,14 @@ def main():
         
     print("-" * (18 + (col_w + 1) * len(approaches)))
 
+    print("\nPer-instance plan time over solved problems, pooled across seeds "
+          "(median / p90 / max, s):")
+    for name in approaches:
+        t = results[name]["plan_times"]
+        if t:
+            print(f"  {name:<12} {np.median(t):.4f} / {np.percentile(t, 90):.4f} "
+                  f"/ {np.max(t):.4f}  (n={len(t)})")
+
     # Save structured results to JSON
     json_results = {}
     for name in approaches:
@@ -223,15 +249,19 @@ def main():
             "solved": results[name]["solved"],
             "total": results[name]["total"],
             "plan_times": results[name]["plan_times"],
+            "plan_times_per_seed": results[name]["plan_times_per_seed"],
+            "times_by_problem_per_seed": results[name]["times_by_problem_per_seed"],
+            "plan_lengths_per_seed": results[name]["plan_lengths_per_seed"],
             "plan_lengths": [v if not np.isnan(v) else None
                              for v in results[name]["plan_lengths"]],
         }
     os.makedirs("experiment_results", exist_ok=True)
-    json_path = os.path.join("experiment_results", f"{args.env}_results.json")
+    json_path = os.path.join("experiment_results", f"{args.env}_results{('_' + args.tag) if args.tag else ''}.json")
     with open(json_path, "w") as f:
         json.dump({
             "env": args.env,
-            "num_seeds": args.num_seeds,
+            "num_seeds": len(seeds_used),
+            "seeds_used": seeds_used,
             "start_seed": args.start_seed,
             "results": json_results
         }, f, indent=2)

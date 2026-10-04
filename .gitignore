@@ -3,3 +3,9 @@ __pycache__/
 .DS_Store
 experiment_results/
 .venv/
+
+# Paper sources and reviewer response (kept local)
+main.tex
+refs.bib
+response_to_reviewers.md
+figures_src/

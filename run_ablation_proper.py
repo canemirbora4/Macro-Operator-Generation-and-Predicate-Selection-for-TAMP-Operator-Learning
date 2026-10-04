@@ -26,6 +26,8 @@ def parse_args():
     parser.add_argument("--start_seed", required=True, type=int)
     parser.add_argument("--num_seeds", required=True, type=int)
     parser.add_argument("--collect_data", type=int, default=0)
+    parser.add_argument("--tag", type=str, default="",
+                        help="Suffix for the results file, e.g. 50seeds")
     parser.add_argument("--variants", type=str, default=None,
                         help="Comma-separated subset of: Full Model,- IPS,- Macro")
     return parser.parse_args()
@@ -99,11 +101,18 @@ def main():
     print(f"PROPER ABLATION on {args.env} ({args.num_seeds} seeds)")
     print(f"Variants: {list(approaches.keys())}")
     
-    for seed in range(args.start_seed, args.start_seed + args.num_seeds):
+    seeds_used = []
+    for seed in range(args.start_seed, args.start_seed + args.num_seeds + 100):
+        if len(seeds_used) >= args.num_seeds:
+            break
         print(f"\nSeed {seed}:")
         env = create_env(config)
         env.set_seed(seed)
-        test_problems = env.get_test_problems()
+        try:
+            test_problems = env.get_test_problems()
+        except Exception as exc:  # the problem sampler can run out of attempts
+            print(f"  skipping seed {seed}: cannot sample test problems ({exc})")
+            continue
         
         for name, cls in approaches.items():
             print(f"  {name}...", end=" ", flush=True)
@@ -115,6 +124,8 @@ def main():
             results[name]["solved"].append(m["solved"])
             results[name]["total"].append(m["total"])
             results[name]["plan_times"].extend(m["plan_times"])
+            results[name]["plan_times_per_seed"].append(list(m["plan_times"]))
+            results[name]["plan_lengths_per_seed"].append(list(m["plan_lengths"]))
             if m["plan_lengths"]:
                 results[name]["plan_lengths"].append(np.mean(m["plan_lengths"]))
             else:
@@ -122,6 +133,7 @@ def main():
             
             avg_time = f"{np.mean(m['plan_times']):.4f}s" if m['plan_times'] else "N/A"
             print(f"Solved {m['solved']}/{m['total']} ({avg_time} avg)")
+        seeds_used.append(seed)
     
     # Results table
     col_w = 22
@@ -139,7 +151,8 @@ def main():
     
     def get_stats(data, key, is_rate=False):
         if key == "plan_times":
-            vals = data[key]
+            # One value per seed: mean time over that seed's solved problems
+            vals = [float(np.mean(t)) for t in data["plan_times_per_seed"] if t]
         elif key == "plan_lengths":
             vals = [v for v in data[key] if not np.isnan(v)]
         elif is_rate:
@@ -148,7 +161,7 @@ def main():
             vals = data[key]
         if not vals: return "N/A"
         mean = np.mean(vals)
-        std = np.std(vals)
+        std = np.std(vals, ddof=1) if len(vals) > 1 else 0.0
         if is_rate:
             return f"{100*mean:.1f} ± {100*std:.1f}%"
         if key in ["ops", "preds"]:
@@ -177,6 +190,14 @@ def main():
         
     print("-" * (18 + (col_w + 1) * len(approaches)))
 
+    print("\nPer-instance plan time over solved problems, pooled across seeds "
+          "(median / p90 / max, s):")
+    for name in approaches:
+        t = results[name]["plan_times"]
+        if t:
+            print(f"  {name:<12} {np.median(t):.4f} / {np.percentile(t, 90):.4f} "
+                  f"/ {np.max(t):.4f}  (n={len(t)})")
+
     # Save JSON
     json_results = {}
     for name in approaches:
@@ -187,15 +208,18 @@ def main():
             "solved": results[name]["solved"],
             "total": results[name]["total"],
             "plan_times": results[name]["plan_times"],
+            "plan_times_per_seed": results[name]["plan_times_per_seed"],
+            "plan_lengths_per_seed": results[name]["plan_lengths_per_seed"],
             "plan_lengths": [v if not np.isnan(v) else None
                              for v in results[name]["plan_lengths"]],
         }
     os.makedirs("experiment_results", exist_ok=True)
-    json_path = os.path.join("experiment_results", f"{args.env}_ablation_proper.json")
+    json_path = os.path.join("experiment_results", f"{args.env}_ablation_proper{('_' + args.tag) if args.tag else ''}.json")
     with open(json_path, "w") as f:
         json.dump({
             "env": args.env,
-            "num_seeds": args.num_seeds,
+            "num_seeds": len(seeds_used),
+            "seeds_used": seeds_used,
             "start_seed": args.start_seed,
             "results": json_results
         }, f, indent=2)
