@@ -7,8 +7,10 @@ The mining procedure consists of five phases:
   1. Compute typical ADD/DELETE effects per action type from demonstrations.
   2. Identify causal pairs: ADD(a1) ∩ DEL(a2) contains an object-specific
      predicate (arity > 0), meaning a1 produces a condition a2 requires.
-  3. Validate pairs empirically (must occur consecutively in data) and
-     resolve symmetric conflicts by keeping the higher-frequency direction.
+  3. Validate pairs empirically (an atom added by a1 must be the same atom
+     deleted by a2 in the demonstrations), drop pairs that only undo
+     themselves, and resolve symmetric conflicts by keeping the
+     higher-frequency direction.
   4. Build macro transitions: each consecutive (a1 → a2) occurrence becomes
      a single macro step (x_i, M, x_{i+2}) via argument unification.
   5. Generate synthetic negative examples to balance the training set.
@@ -102,18 +104,38 @@ class LOFTMacro(LOFTIPS):
             meaningful = {p for p in overlap if pred_arity.get(p, 0) > 0}
             print(f"  {a1} → {a2}  (via: {', '.join(sorted(meaningful))})")
 
-        # ==== Phase 3: Frequency validation and symmetric-pair resolution ====
+        # ==== Phase 3: Atom-level validation and symmetric-pair resolution ====
+        # A consecutive occurrence of a candidate pair counts only if the link
+        # is real: an atom added by the first action must be the same atom
+        # (same predicate, same objects) that the second action deletes.
+        # Only demonstrations are used, since random-exploration trajectories
+        # contain no consecutive actions. A pair whose actions leave the
+        # symbolic state unchanged in every occurrence only undoes itself
+        # and is dropped.
         pair_freq = Counter()
-        total_pairs = 0
-        for traj in all_trajs:
+        pair_undone = Counter()
+        for traj in demos:
             for i in range(len(traj) - 1):
-                act1 = traj[i][1]
-                act2 = traj[i + 1][1]
-                if hasattr(act1, 'predicate') and hasattr(act2, 'predicate'):
-                    pair_freq[(act1.predicate.name, act2.predicate.name)] += 1
-                    total_pairs += 1
+                act1, act2 = traj[i][1], traj[i + 1][1]
+                if not hasattr(act1, 'predicate') or \
+                   not hasattr(act2, 'predicate'):
+                    continue
+                s0 = self._parser(traj[i][0])
+                s1 = self._parser(traj[i][2])
+                s2 = self._parser(traj[i + 1][2])
+                added = {e for e in construct_effects(s0, s1)
+                         if not getattr(e, 'is_anti', False)}
+                deleted = {e.inverted_anti for e in construct_effects(s1, s2)
+                           if getattr(e, 'is_anti', False)}
+                if any(p.predicate.arity > 0 for p in added & deleted):
+                    key = (act1.predicate.name, act2.predicate.name)
+                    pair_freq[key] += 1
+                    if set(s0) == set(s2):
+                        pair_undone[key] += 1
 
-        validated = {pair for pair in causal_pairs if pair_freq[pair] > 0}
+        validated = {pair for pair in causal_pairs
+                     if pair_freq[pair] > 0
+                     and pair_undone[pair] < pair_freq[pair]}
 
         # For symmetric pairs keep only the higher-frequency direction.
         to_remove = set()
@@ -128,9 +150,7 @@ class LOFTMacro(LOFTIPS):
         print(f"[MacroMine] Validated macros after frequency + symmetric filter:"
               f" {len(validated)}")
         for a1, a2 in sorted(validated):
-            f = pair_freq[(a1, a2)]
-            pct = 100 * f / total_pairs if total_pairs else 0
-            print(f"  {a1} → {a2}  (freq={f}, {pct:.1f}%)")
+            print(f"  {a1} → {a2}  (freq={pair_freq[(a1, a2)]})")
 
         # ==== Phase 4: Build macro transitions ====
         macro_transitions = []
@@ -184,17 +204,25 @@ class LOFTMacro(LOFTIPS):
         indices1 = []
         indices2 = []
 
-        for arg in act1.variables:
+        def slot(arg):
+            # Only objects can be shared between the two sub-actions.
+            # A continuous parameter is a value that each sub-action samples
+            # for itself, so it always gets its own slot. Its entity gets a
+            # unique name, because entities with the same name are equal.
+            if arg.is_continuous:
+                unique_args.append(
+                    arg.var_type(f"{arg.name}_s{len(unique_args)}", arg.value))
+                return len(unique_args) - 1
             if arg not in seen_map:
                 seen_map[arg] = len(unique_args)
                 unique_args.append(arg)
-            indices1.append(seen_map[arg])
+            return seen_map[arg]
+
+        for arg in act1.variables:
+            indices1.append(slot(arg))
 
         for arg in act2.variables:
-            if arg not in seen_map:
-                seen_map[arg] = len(unique_args)
-                unique_args.append(arg)
-            indices2.append(seen_map[arg])
+            indices2.append(slot(arg))
 
         sig = (f"{tuple(indices1)}-{tuple(indices2)}"
                .replace("(", "").replace(")", "")
